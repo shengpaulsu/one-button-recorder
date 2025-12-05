@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tokyo Paul – One Button Recorder (WebM)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    body {
+      margin: 0; padding: 16px;
+      background: #0f172a; color: #e5e7eb;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .wrap {
+      max-width: 900px; margin: 0 auto;
+      background: #020617; padding: 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(148,163,184,0.6);
+    }
+    h1 { margin: 0 0 8px; font-size: 18px; }
+    p  { margin: 4px 0 10px; font-size: 13px; color: #9ca3af; }
+    video {
+      width: 100%; max-height: 360px;
+      background: black; border-radius: 12px;
+      margin-top: 12px;
+      border: 1px solid rgba(148,163,184,0.8);
+    }
+    button, select {
+      width: 100%; padding: 8px 10px;
+      border-radius: 999px; margin-top: 8px;
+      border: 1px solid rgba(148,163,184,0.6);
+      background: #020617; color: #e5e7eb;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    button {
+      background: linear-gradient(to right, #f97316, #ea580c);
+      border: none; color: #111827; font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #020617;
+      border: 1px solid rgba(148,163,184,0.8);
+      color: #e5e7eb;
+    }
+    button:disabled {
+      opacity: 0.6; cursor: not-allowed;
+    }
+    .row {
+      display: flex; gap: 8px; margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .row > * { flex: 1 1 48%; }
+    #status {
+      margin-top: 10px; font-size: 12px; color: #9ca3af;
+    }
+    #downloads {
+      margin-top: 12px; display: none; font-size: 12px;
+    }
+    #downloads a {
+      display: inline-block; margin-top: 6px;
+      padding: 6px 10px; border-radius: 999px;
+      text-decoration: none;
+      border: 1px solid rgba(148,163,184,0.8);
+      color: #e5e7eb; font-size: 12px;
+    }
+    #downloads a:hover { background: #111827; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Tokyo Paul – One Button Recorder (WebM)</h1>
+  <p>
+    1. Click <b>Enable Camera &amp; Mic</b> and allow access.<br>
+    2. Choose <b>Iriun</b> for Camera and <b>Hollyland</b> for Mic if shown.<br>
+    3. Start Preview → Start Recording → Stop → Download WebM.<br>
+    4. Upload WebM to YouTube or convert to MP4 using HandBrake.
+  </p>
+
+  <button id="enableBtn">Enable Camera &amp; Mic</button>
+
+  <div class="row" style="margin-top:10px;">
+    <select id="cameraSelect"></select>
+    <select id="micSelect"></select>
+  </div>
+
+  <button id="previewBtn" disabled>Start Preview</button>
+
+  <video id="video" autoplay playsinline muted></video>
+
+  <div class="row">
+    <button id="recordBtn" disabled>Start Recording</button>
+    <button id="stopBtn" class="secondary" disabled>Stop Recording</button>
+  </div>
+
+  <div id="status">Waiting…</div>
+
+  <div id="downloads">
+    <strong>Download:</strong>
+    <a id="webmLink" href="#" download>Download recording (WebM)</a>
+  </div>
+</div>
+
+<script>
+  const enableBtn    = document.getElementById('enableBtn');
+  const previewBtn   = document.getElementById('previewBtn');
+  const recordBtn    = document.getElementById('recordBtn');
+  const stopBtn      = document.getElementById('stopBtn');
+  const cameraSelect = document.getElementById('cameraSelect');
+  const micSelect    = document.getElementById('micSelect');
+  const videoEl      = document.getElementById('video');
+  const statusEl     = document.getElementById('status');
+  const downloadsEl  = document.getElementById('downloads');
+  const webmLink     = document.getElementById('webmLink');
+
+  let stream = null;
+  let recorder = null;
+  let chunks = [];
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+
+  async function enableDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('Your browser does not support camera/mic recording. Use Chrome or Edge.');
+      return;
+    }
+    try {
+      setStatus('Requesting camera & mic permissions…');
+      const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      tempStream.getTracks().forEach(t => t.stop());
+      await loadDevices();
+      previewBtn.disabled = false;
+      setStatus('Permissions granted. Choose devices and click Start Preview.');
+    } catch (err) {
+      console.error(err);
+      setStatus('Permission denied. Allow camera/mic in browser bar and try again.');
+    }
+  }
+
+  async function loadDevices() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    const mics = devices.filter(d => d.kind === 'audioinput');
+
+    cameraSelect.innerHTML = '';
+    micSelect.innerHTML = '';
+
+    cams.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || 'Camera ' + (i + 1);
+      cameraSelect.appendChild(opt);
+    });
+
+    mics.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || 'Mic ' + (i + 1);
+      micSelect.appendChild(opt);
+    });
+
+    [...cameraSelect.options].forEach((o, i) => {
+      if (o.text.toLowerCase().includes('iriun') ||
+          o.text.toLowerCase().includes('galaxy')) {
+        cameraSelect.selectedIndex = i;
+      }
+    });
+    [...micSelect.options].forEach((o, i) => {
+      if (o.text.toLowerCase().includes('hollyland')) {
+        micSelect.selectedIndex = i;
+      }
+    });
+  }
+
+  async function startPreview() {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+
+    const videoId = cameraSelect.value;
+    const audioId = micSelect.value;
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: videoId ? { deviceId: { exact: videoId } } : true,
+        audio: audioId ? { deviceId: { exact: audioId } } : true
+      });
+      videoEl.srcObject = stream;
+      recordBtn.disabled = false;
+      setStatus('Preview running. If you see your phone feed, you are good.');
+    } catch (err) {
+      console.error(err);
+      setStatus('Could not start preview with selected devices. Try another camera/mic.');
+    }
+  }
+
+  function startRecording() {
+    if (!stream) {
+      setStatus('No stream found. Start Preview first.');
+      return;
+    }
+    chunks = [];
+    let options = { mimeType: 'video/webm;codecs=vp8,opus' };
+    try {
+      recorder = new MediaRecorder(stream, options);
+    } catch (e) {
+      recorder = new MediaRecorder(stream);
+    }
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      if (!chunks.length) {
+        setStatus('Recording stopped but no data captured.');
+        recordBtn.disabled = false;
+        return;
+      }
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url  = URL.createObjectURL(blob);
+      const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0,19);
+      const filename = 'tokyopaul-recording-' + ts + '.webm';
+
+      webmLink.href = url;
+      webmLink.download = filename;
+      webmLink.textContent = 'Download recording (' + filename + ')';
+      downloadsEl.style.display = 'block';
+      setStatus('Done! WebM saved. Upload to YouTube or convert to MP4 in HandBrake.');
+      recordBtn.disabled = false;
+    };
+
+    recorder.start(200);
+    recordBtn.disabled = true;
+    stopBtn.disabled = false;
+    setStatus('Recording… talk to the camera, then click Stop.');
+  }
+
+  function stopRecording() {
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+      setStatus('Stopping recording…');
+    }
+    stopBtn.disabled = true;
+  }
+
+  enableBtn.addEventListener('click', enableDevices);
+  previewBtn.addEventListener('click', startPreview);
+  recordBtn.addEventListener('click', startRecording);
+  stopBtn.addEventListener('click', stopRecording);
+</script>
+</body>
+</html>
